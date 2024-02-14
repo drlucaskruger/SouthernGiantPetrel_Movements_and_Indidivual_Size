@@ -1,0 +1,256 @@
+---
+title: "Supplemental material 3 - Statistical analysis and plots"
+author: "Lucas Krüger"
+date: "2024-02-08"
+output: html_document
+---
+
+```{r,warning=FALSE}
+
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(car)
+library(lmerTest)
+library(sjPlot)
+
+
+
+```
+
+# load previously processed GPS data and summarise to have all variables at the day scale
+
+```{r,warning=FALSE}
+
+
+dfS<-readRDS("C:/GiantSuperModel/WindUse/GiantsOnIce/GiantPetrels_processed_trips.Rds")
+
+
+daydf<-plyr::ddply(dfS, c("daystamp","tripID","Ring","Trip","beh.state","head.tails"), summarise,
+                   MCD=max(ColDist), # maximum colony distance for the day, trip, and state
+                   MTD=max(total_dist), #maximum trip distance 
+                   Tdur=mean(as.numeric(return-departure)),#trip duration # does not vary between states or days if the trip has more than one day
+                   Tdir=mean(direction), # trip direction, does not vary between states or days if the trip has more than one day
+                   speed=mean(speed.ms), # mean bird ground speed
+                   dist=sum(dist), #accumulated distance covered in one day per trip per state
+                   abs.dir=mean(abs.dir), # mean direction between consecutive points
+                   windspeed=mean(windspeed),
+                   head.tail=mean(na.omit(heaedtailN)),
+                   SIC=mean(na.omit(SIC)), CHL=mean(na.omit(CHL)),
+                   N=length(ColDist),
+                   perc=(N/max(n_locs))*100)    # percentage of fixes 
+
+body<-read.csv("C:/GiantSuperModel/body_measures.csv") # body measures 
+
+body$sexo<-ifelse(body$bill.mm>90,"M","F")
+
+ids<-na.omit(merge(daydf,body,by="Ring",all=F))
+
+
+# variable transformation 
+ids$speedZ<-scale(sqrt(ids$speed))
+
+ids$distT<-sqrt((log10(ids$dist+1))) # consecutive transformations to reduce over-dispersion 
+
+#subset
+transit<-subset(ids,beh.state=="Transit") # transit points
+
+forag<-subset(ids,beh.state!="Transit") # foraging, scavenging and resting points
+```
+
+
+# Statistical analysis. Please see supplemental material 2 for variables transformation procedure, a priori and a posteriori diagnostics
+
+```{r,warning=FALSE}
+transit<-subset(ids,beh.state=="Transit")
+lmm1<-lmer(speedZ~(windspeed)+(windspeed|Ring),data=transit)
+summary(lmm1)
+anova(lmm1, type=1, ddf="Satterthwaite")
+ranova(lmm1)
+
+
+lmm2<-lmer(speedZ~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Tail"))
+summary(lmm2)
+anova(lmm2, type=1, ddf="Satterthwaite")
+ranova(lmm2)
+
+lmm3<-lmer(speedZ~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Head"))
+summary(lmm3)
+anova(lmm3, type=1, ddf="Satterthwaite")
+ranova(lmm3)
+
+
+lmm4<-lmer(distT~windspeed+(windspeed|Ring),data=transit)
+summary(lmm4)
+anova(lmm4, type=1, ddf="Satterthwaite")
+ranova(lmm4)
+
+
+
+lmm5<-lmer(distT~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Tail"))
+summary(lmm5)
+anova(lmm5, type=1, ddf="Satterthwaite")
+ranova(lmm5)
+
+
+lmm6<-lmer(distT~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Head"))
+summary(lmm6)
+anova(lmm6, type=1, ddf="Satterthwaite")
+ranova(lmm6)
+
+
+### extract significant random effects 
+
+ranef1<-data.frame(ranef(lmm1))
+ranef3<-data.frame(ranef(lmm3))
+ranef4<-data.frame(ranef(lmm4))
+ranef5<-data.frame(ranef(lmm5))
+ranef6<-data.frame(ranef(lmm6))
+
+ranef1$Ring<-ranef1$grp
+ranef3$Ring<-ranef3$grp
+ranef4$Ring<-ranef4$grp
+ranef5$Ring<-ranef5$grp
+ranef6$Ring<-ranef6$grp
+
+
+r1<-merge(ranef1,body)
+r3<-merge(ranef3,body)
+r4<-merge(ranef4,body)
+r5<-merge(ranef5,body)
+r6<-merge(ranef6,body)
+
+### foraging variables 
+ids$sicbin<-ifelse(ids$SIC>0,1,0)
+forag<-subset(ids,beh.state!="Transit")
+
+lmm8<-lmer(distT~CHL+(CHL|Ring),data=forag)
+summary(lmm8)
+anova(lmm8, type=1, ddf="Satterthwaite")
+ranova(lmm8)
+
+lmm9<-lmer(distT~SIC+(SIC|Ring),data=forag)
+summary(lmm9)
+anova(lmm9, type=1, ddf="Satterthwaite")
+ranova(lmm9)
+
+ranef8<-data.frame(ranef(lmm8))
+ranef9<-data.frame(ranef(lmm9))
+
+ranef8$Ring<-ranef8$grp
+ranef9$Ring<-ranef9$grp
+
+r8<-merge(ranef8,body)
+r9<-merge(ranef9,body)
+
+
+# figure 3
+
+(ggplot(data=subset(r1,term=="windspeed"),aes(tarsus.mm,condval,
+                                              colour=sexo,shape=sexo,linetype=sexo))+
+    geom_smooth(method="lm",se=F)+
+    geom_errorbar(aes(ymin=condval-condsd,ymax=condval+condsd))+geom_point()+
+    theme_bw()+
+    scale_colour_manual(values=c("red","blue"))+
+    xlab("Tarsus (mm)")+ ylab("Slope")+
+    ggtitle(label="a. [bird ground speed ~ wind speed]")+
+    
+    
+    
+    ggplot(data=subset(r3,term=="head.tail"),aes(tarsus.mm,condval,
+                                                 colour=sexo,shape=sexo,linetype=sexo))+
+    geom_smooth(method="lm",se=F)+
+    geom_errorbar(aes(ymin=condval-condsd,ymax=condval+condsd))+geom_point()+
+    theme_bw()+
+    scale_colour_manual(values=c("red","blue"))+
+    xlab("Tarsus (mm)")+ ylab("Slope")+
+    ggtitle(label="b. [bird ground speed ~ head wind]"))/
+  
+  
+  (  ggplot(data=subset(r4,term=="windspeed"),aes(tarsus.mm,condval,
+                                                  colour=sexo,shape=sexo,linetype=sexo))+
+       geom_smooth(method="lm",se=F)+
+       geom_errorbar(aes(ymin=condval-condsd,ymax=condval+condsd))+geom_point()+
+       theme_bw()+
+       scale_colour_manual(values=c("red","blue"))+
+       xlab("Tarsus (mm)")+ ylab("Slope")+
+       ggtitle(label="c. [covered distance ~ wind speed]")+
+       
+       
+       
+       
+       
+       ggplot(data=subset(r6,term=="head.tail"),aes(tarsus.mm,condval,
+                                                    colour=sexo,shape=sexo,linetype=sexo))+
+       geom_smooth(method="lm",se=F)+
+       geom_errorbar(aes(ymin=condval-condsd,ymax=condval+condsd))+geom_point()+
+       theme_bw()+
+       scale_colour_manual(values=c("red","blue"))+
+       xlab("Tarsus (mm)")+ ylab("Slope")+
+       ggtitle(label="d. [covered distance ~ head wind]"))/
+  
+  
+  
+  (ggplot(data=subset(r8,term=="CHL"),aes(bill.mm,condval,
+                                          colour=sexo,shape=sexo,linetype=sexo))+
+     geom_smooth(method="lm",se=F)+
+     geom_errorbar(aes(ymin=condval-condsd,ymax=condval+condsd))+geom_point()+
+     theme_bw()+
+     scale_colour_manual(values=c("red","blue"))+
+     xlab("Bill (mm)")+ ylab("Slope")+
+     ggtitle(label="e. [covered distance ~ chlorophyll-a]")+
+     
+     
+     
+     ggplot(data=subset(r9,term=="SIC"),aes(bill.mm,condval/1.457322,
+                                            colour=sexo,shape=sexo,linetype=sexo))+
+     geom_smooth(method="lm",se=F)+
+     geom_errorbar(aes(ymin=(condval/1.457322)-condsd,ymax=(condval/1.457322)+condsd))+geom_point()+
+     theme_bw()+
+     scale_colour_manual(values=c("red","blue"))+
+     xlab("Bill (mm)")+ ylab("Slope")+
+     ggtitle(label="f. [covered distance ~ sea ice]"))
+
+```
+
+
+# finally, two examples of trips, a long one, targeting sea ice, and a short one, foraging on productive sites along the trip
+
+```{r,warning=FALSE}
+
+
+ggplot(subset(dfS,tripID=="V00649 21/22_01" & speed.ms>0),
+        aes(DateTime,ColDist/1000))+
+    geom_line(colour="black",linewidth=1.4)+
+    facet_wrap(ID~.)+#+scale_colour_distiller(palette="Spectral")
+    ylab("Distance from colony (km)")+facet_wrap(Ring~.)+
+  theme_bw()+
+    
+ggplot(data=subset(dfS,tripID=="V00649 21/22_01" & speed.ms>0))+
+    geom_point(aes(DateTime,windspeed,  colour=beh.state,size=SIC))+
+    geom_smooth(aes(DateTime,windspeed), linetype="dotted",method="gam",
+                formula=y~s(x,k=5),
+                se=F,colour="grey50",linewidth=1.4)+
+    facet_wrap(ID~.)+#+scale_colour_distiller(palette="Spectral")
+    ylab("WInd speed (m/s)")+facet_wrap(Ring~.)+
+  theme_bw()+
+
+ggplot(subset(dfS,tripID=="V00634 22/23_01" & speed.ms>0),
+        aes(DateTime,ColDist/1000))+
+    geom_line(colour="black",linewidth=1.4)+
+    facet_wrap(ID~.)+#+scale_colour_distiller(palette="Spectral")
+    ylab("Distance from colony (km)")+facet_wrap(Ring~.)+
+  theme_bw()+
+  
+    ggplot(data=subset(dfS,tripID=="V00634 22/23_01" & speed.ms>0))+
+    geom_point(aes(DateTime,windspeed,  colour=beh.state,size=CHL))+
+    geom_smooth(aes(DateTime,windspeed), linetype="dotted",method="gam",
+                formula=y~s(x,k=5),
+                se=F,colour="grey50",linewidth=1.4)+
+    facet_wrap(ID~.)+#+scale_colour_distiller(palette="Spectral")
+    ylab("WInd speed (m/s)")+facet_wrap(Ring~.)+
+  scale_size_continuous(breaks=c(0.25,1,1.5,2))+theme_bw()
+
+
+
+```

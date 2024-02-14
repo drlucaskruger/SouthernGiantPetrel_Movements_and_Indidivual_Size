@@ -1,0 +1,192 @@
+---
+title: "Supplemental material 2 - Variables transformation and models diagnostics"
+author: "Lucas Krüger"
+date: "2024-02-08"
+output: 
+  html_document: 
+    fig_width: 10
+---
+
+```{r,warning=FALSE}
+library(ggplot2)
+library(dplyr)
+library(lmerTest)
+library(sjPlot)
+library(patchwork)
+
+
+
+dfS<-readRDS("C:/GiantSuperModel/WindUse/GiantsOnIce/GiantPetrels_processed_trips.Rds")
+
+
+daydf<-plyr::ddply(dfS, c("daystamp","tripID","Ring","Trip","beh.state","head.tails"), summarise,
+                   MCD=max(ColDist), # maximum colony distance for the day, trip, and state
+                   MTD=max(total_dist), #maximum trip distance 
+                   Tdur=mean(as.numeric(return-departure)),#trip duration # does not vary between states or days if the trip has more than one day
+                   Tdir=mean(direction), # trip direction, does not vary between states or days if the trip has more than one day
+                   speed=mean(speed.ms), # mean bird ground speed
+                   dist=sum(dist), #accumulated distance covered in one day per trip per state
+                   abs.dir=mean(abs.dir), # mean direction between consecutive points
+                   windspeed=mean(windspeed),
+                   head.tail=mean(na.omit(heaedtailN)),
+                   SIC=mean(na.omit(SIC)), CHL=mean(na.omit(CHL)),
+                   N=length(ColDist),
+                   perc=(N/max(n_locs))*100)    # percentage of fixes 
+
+body<-read.csv("C:/GiantSuperModel/body_measures.csv") # body measures 
+
+body$sexo<-ifelse(body$bill.mm>90,"M","F")
+
+ids<-na.omit(merge(daydf,body,by="Ring",all=F))
+
+
+# variable transformation 
+ids$speedZ<-scale(sqrt(ids$speed))
+
+ids$distT<-sqrt((log10(ids$dist+1))) # consecutive transformations to reduce over-dispersion 
+
+#subset
+transit<-subset(ids,beh.state=="Transit")
+
+forag<-subset(ids,beh.state!="Transit")
+
+```
+
+
+# first, transform variables and do some histogram and scatterplots
+
+```{r,warning=FALSE}
+### some diagnostics
+
+
+
+
+(ggplot(subset(ids,beh.state=="Transit"),aes(speed))+geom_histogram()+ 
+  theme_bw()+xlab("ground speed")+
+  ggtitle(label="a. raw ground speed in Transit")+
+  
+  ggplot(subset(ids,beh.state=="Transit"),aes(speedZ))+geom_histogram()+ 
+  theme_bw()+xlab("ground speed")+
+  ggtitle(label="b. transformed ground speed in Transit")+
+  
+ggplot(subset(ids,beh.state!="Transit"),aes(dist))+geom_histogram() +
+theme_bw()+xlab("raw distance")+
+  ggtitle(label="c. covered distance in Transit")+
+
+ggplot(subset(ids,beh.state!="Transit"),aes(distT))+geom_histogram() +
+  theme_bw()+xlab("transformed distance")+
+  ggtitle(label="d. covered distance in Transit"))
+
+
+
+ggplot(subset(ids,beh.state=="Transit"),aes(windspeed,speedZ))+
+  geom_smooth(method="lm")+theme_bw()+xlab("wind speed (m/s)")+ylab("scaled ground speed")+
+  geom_point(alpha=0.5)+ggtitle("a.")+
+
+  ggplot(subset(ids,beh.state=="Transit" & head.tails=="Tail"),aes(head.tail,speedZ))+
+  geom_smooth(method="lm")+theme_bw()+xlab("tail wind component")+ylab("scaled ground speed")+
+  geom_point(alpha=0.5)+ggtitle("b.")+ #in this group there is some dispersion
+
+ggplot(subset(ids,beh.state=="Transit" & head.tails=="Head"),aes(head.tail,speedZ))+
+  geom_smooth(method="lm")+theme_bw()+xlab("head wind component")+ylab("scaled ground speed")+
+  geom_point(alpha=0.5)+ggtitle("c.")+
+
+ggplot(subset(ids,beh.state=="Transit"),aes(windspeed,distT))+
+  geom_smooth(method="lm")+theme_bw()+ylab("transformed distance")+xlab("wind speed")+
+  geom_point(alpha=0.5)+ggtitle("d.")+
+
+ggplot(subset(ids,beh.state=="Transit" & head.tails=="Tail"),aes(head.tail,distT))+
+  geom_smooth(method="lm")+theme_bw()+xlab("tail wind component")+ylab("transformed distance")+
+  geom_point(alpha=0.5)+ggtitle("e.")+ #in this group there is some dispersion
+  
+  ggplot(subset(ids,beh.state=="Transit" & head.tails=="Head"),aes(head.tail,distT))+
+  geom_smooth(method="lm")+theme_bw()+xlab("head wind component")+ylab("transformed distance")+
+  geom_point(alpha=0.5)+ggtitle("f.")+
+
+ggplot(subset(ids,beh.state=="Transit"),aes(speedZ,distT))+
+  geom_smooth(method="lm")+theme_bw()+ylab("transformed distance")+xlab("scaled ground speed")+
+  geom_point(alpha=0.5)+ggtitle("g.")
+
+
+
+
+
+
+```
+
+# dispersion seems ok for the analysis after transformations, however, a posteriori diagnostics will be conducted anyway
+
+
+
+```{r,warning=FALSE}
+
+lmm1<-lmer(speedZ~(windspeed)+(windspeed|Ring),data=transit)
+
+plot_model(lmm1,type="diag",grid=F)[3] # normality
+plot_model(lmm1,type="diag",grid=F)[4] # dispersion 
+plot_model(lmm1,type="diag")[2]       # random effect dispersion
+
+# all forward plots follows the same order 
+
+
+lmm2<-lmer(speedZ~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Tail"))
+
+(plot_model(lmm2,type="diag")[3])
+(plot_model(lmm2,type="diag")[4])
+(plot_model(lmm2,type="diag")[2])
+
+lmm3<-lmer(speedZ~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Head"))
+
+
+(plot_model(lmm3,type="diag")[3])
+(plot_model(lmm3,type="diag")[4])
+(plot_model(lmm3,type="diag")[2])
+
+
+
+lmm4<-lmer(distT~windspeed+(windspeed|Ring),data=transit)
+
+
+(plot_model(lmm4,type="diag")[3])
+(plot_model(lmm4,type="diag")[4])
+(plot_model(lmm4,type="diag")[2])
+
+
+
+
+lmm5<-lmer(distT~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Tail"))
+
+(plot_model(lmm5,type="diag")[3])
+(plot_model(lmm5,type="diag")[4])
+(plot_model(lmm5,type="diag")[2])
+
+
+lmm6<-lmer(distT~head.tail+(head.tail|Ring),data=subset(transit,head.tails=="Head"))
+
+
+(plot_model(lmm6,type="diag")[3])
+(plot_model(lmm6,type="diag")[4])
+(plot_model(lmm6,type="diag")[2])
+
+
+lmm8<-lmer(distT~CHL+(CHL|Ring),data=forag)
+
+
+(plot_model(lmm8,type="diag")[3])
+(plot_model(lmm8,type="diag")[4]) # some dispersion 
+(plot_model(lmm8,type="diag")[2])
+
+
+
+
+lmm9<-lmer(distT~SIC+(SIC|Ring),data=forag)
+
+(plot_model(lmm9,type="diag")[3])
+(plot_model(lmm9,type="diag")[4]) # some dispersion 
+(plot_model(lmm9,type="diag")[2])
+
+
+
+```
+
+
